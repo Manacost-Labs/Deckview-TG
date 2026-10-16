@@ -13,6 +13,7 @@ from deckview.config import HSJSON_CARDS_URL, HSJSON_LOCALE
 from framework.blizzard_api import get_blizzard_api
 from framework.hearthstonejson_api import (
     configure as hsjson_configure,
+    ensure_loaded as hsjson_ensure_loaded,
     get_card_by_dbfid,
     get_loaded_card_by_dbfid,
 )
@@ -45,7 +46,7 @@ _DECK_DISK_CACHE_PATH = Path(
 )
 _deck_cache_lock = threading.RLock()
 _deck_cache = OrderedDict()
-_DECK_CACHE_PAYLOAD_VERSION = 3
+_DECK_CACHE_PAYLOAD_VERSION = 4
 
 _FORMAT_NAMES = {
     1: "wild",
@@ -79,6 +80,21 @@ _BASE_HERO_CLASSES = {
     56550: "DEMONHUNTER",
     78065: "DEATHKNIGHT",
 }
+# These heroes have `classes` but no single `cardClass` in HearthstoneJSON.
+# Keep their own class for the existing class art, regardless of deck contents.
+_MULTICLASS_HERO_CLASSES = {
+    "Anduin": "PRIEST",
+    "Garrosh": "WARRIOR",
+    "Guldan": "WARLOCK",
+    "Illidan": "DEMONHUNTER",
+    "Jaina": "MAGE",
+    "Lich_King": "DEATHKNIGHT",
+    "Malfurion": "DRUID",
+    "Rexxar": "HUNTER",
+    "Thrall": "SHAMAN",
+    "Uther": "PALADIN",
+    "Valeera": "ROGUE",
+}
 
 
 def _resolve_deck_format(deck_format: int, dbf_ids) -> str:
@@ -102,7 +118,7 @@ def _resolve_deck_format(deck_format: int, dbf_ids) -> str:
 def _response_deck_format(deck_code: str, response: dict) -> str:
     """Resolve legality from the deckstring itself, even after API fallback."""
     try:
-        entries, _heroes, deck_format, _sideboards = _decode_deckstring(deck_code)
+        entries, heroes, deck_format, _sideboards = _decode_deckstring(deck_code)
         dbf_ids = [dbf_id for dbf_id, _copies in entries]
     except (TypeError, ValueError):
         raw_format = str(response.get("format") or "").strip().lower()
@@ -125,6 +141,9 @@ def _response_deck_format(deck_code: str, response: dict) -> str:
                 continue
             if dbf_id > 0:
                 dbf_ids.append(dbf_id)
+    else:
+        if _is_brawl_deck(heroes):
+            return "tavern-brawl"
     return _resolve_deck_format(deck_format, dbf_ids)
 
 
@@ -220,7 +239,10 @@ _LOCAL_CARD_REQUIRED_FIELDS = ("slug", "name", "manaCost", "cardId")
 def _fill_missing_from_preloaded_hsjson(cards):
     """Complete generated/sideboard cards without entering a network fallback."""
     for card in cards:
-        if all(card.get(field) not in (None, "") for field in _LOCAL_CARD_REQUIRED_FIELDS):
+        if (
+            all(card.get(field) not in (None, "") for field in _LOCAL_CARD_REQUIRED_FIELDS)
+            and (card.get("deckviewPlayerClass") or card.get("deckviewClasses"))
+        ):
             continue
         fallback = get_loaded_card_by_dbfid(card.get("dbfId", card.get("id")))
         if not fallback:
@@ -232,16 +254,39 @@ def _fill_missing_from_preloaded_hsjson(cards):
     return cards
 
 
+def _is_brawl_deck(heroes):
+    for hero in heroes:
+        metadata = get_loaded_card_by_dbfid(hero) or {}
+        if metadata.get("set") == "TB" or str(metadata.get("cardId") or "").startswith("TB_"):
+            return True
+    return False
+
+
 def _infer_class(heroes, cards):
     for hero in heroes:
         class_key = _BASE_HERO_CLASSES.get(int(hero))
         if class_key:
             return class_key
+        metadata = get_loaded_card_by_dbfid(hero) or {}
+        class_key = str(metadata.get("deckviewPlayerClass") or "").upper()
+        if class_key in _CLASS_INFO:
+            return class_key
+        card_id = str(metadata.get("cardId") or "")
+        prefix = "TB_MultiClass_Hero_"
+        if card_id.startswith(prefix):
+            class_key = _MULTICLASS_HERO_CLASSES.get(card_id[len(prefix):])
+            if class_key:
+                return class_key
+        for class_key in metadata.get("deckviewClasses") or []:
+            if class_key in _CLASS_INFO:
+                return class_key
     counts = {}
     for card in cards:
-        class_key = str(card.get("deckviewPlayerClass") or "").strip().upper()
-        if class_key in _CLASS_INFO:
-            counts[class_key] = counts.get(class_key, 0) + 1
+        class_keys = [card.get("deckviewPlayerClass"), *(card.get("deckviewClasses") or [])]
+        for class_key in dict.fromkeys(class_keys):
+            class_key = str(class_key or "").strip().upper()
+            if class_key in _CLASS_INFO:
+                counts[class_key] = counts.get(class_key, 0) + 1
     return max(counts, key=counts.get) if counts else None
 
 
@@ -252,15 +297,27 @@ def _build_local_deck(deck_code):
     hydrate_deck_cards_sync(cards + sideboard)
     _fill_missing_from_preloaded_hsjson(cards + sideboard)
 
-    # Missing metadata would make ordering, mana curve or images incorrect.
-    # In that uncommon case use the bounded Blizzard fallback below.
-    if any(
-        any(
+    def missing_metadata():
+        return any(
             card.get(field) in (None, "")
+            for card in cards + sideboard
             for field in _LOCAL_CARD_REQUIRED_FIELDS
         )
-        for card in cards + sideboard
-    ):
+
+    unknown_hero = any(
+        hero not in _BASE_HERO_CLASSES and get_loaded_card_by_dbfid(hero) is None
+        for hero in heroes
+    )
+    if missing_metadata() or unknown_hero:
+        # Load the shared catalog once, rather than request every missing card.
+        # This also bypasses Blizzard's single-class deck endpoint for brawls.
+        hsjson_configure(HSJSON_CARDS_URL, HSJSON_LOCALE)
+        if hsjson_ensure_loaded(timeout_seconds=8):
+            _fill_missing_from_preloaded_hsjson(cards + sideboard)
+
+    # Missing metadata would make ordering, mana curve or images incorrect.
+    # In that uncommon case use the bounded Blizzard fallback below.
+    if missing_metadata():
         return None
     for card in sideboard:
         if not str(card["slug"]).endswith("-side"):
@@ -274,12 +331,22 @@ def _build_local_deck(deck_code):
         "cards": cards,
         "cardCount": len(cards),
         "class": {"id": class_id, "slug": class_slug, "name": class_name},
-        "format": _resolve_deck_format(
-            deck_format,
-            [dbf_id for dbf_id, _copies in entries],
+        "format": "tavern-brawl" if _is_brawl_deck(heroes) else _resolve_deck_format(
+            deck_format, [dbf_id for dbf_id, _copies in entries]
         ),
         "deckviewDataSource": "deckstring+kolodahs",
     }
+    class_keys = [class_key]
+    for hero in heroes:
+        metadata = get_loaded_card_by_dbfid(hero) or {}
+        for key in metadata.get("deckviewClasses") or []:
+            if key in _CLASS_INFO and key not in class_keys:
+                class_keys.append(key)
+    if len(class_keys) > 1:
+        response["classes"] = [
+            {"id": class_id, "slug": slug, "name": name}
+            for class_id, slug, name in (_CLASS_INFO[key] for key in class_keys)
+        ]
     return response, class_id, sideboard
 
 

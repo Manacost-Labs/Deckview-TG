@@ -1,0 +1,323 @@
+{
+  "source": "https://api.hearthstonejson.com/v1/latest/ruRU/cards.json",
+  "captured_at": "2026-10-15",
+  "cards": [
+    {
+      "dbfId": 128892,
+      "id": "BE_044",
+      "name": "РЕ-3-ВЕР",
+      "cost": 3,
+      "rarity": "COMMON",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 129793,
+      "id": "BE_085",
+      "name": "Ритуал призыва",
+      "cost": 2,
+      "rarity": "COMMON",
+      "cardClass": "WARLOCK",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 129802,
+      "id": "BE_086",
+      "name": "Кощунство",
+      "cost": 4,
+      "rarity": "RARE",
+      "cardClass": "WARLOCK",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 129804,
+      "id": "BE_087",
+      "name": "Непроглядные глубины",
+      "cost": 2,
+      "rarity": "COMMON",
+      "cardClass": "WARLOCK",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 129808,
+      "id": "BE_093",
+      "name": "Мозгоед-поработитель",
+      "cost": 5,
+      "rarity": "COMMON",
+      "cardClass": "WARLOCK",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 129093,
+      "id": "BE_151",
+      "name": "Смотритель хранилища",
+      "cost": 5,
+      "rarity": "COMMON",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 128215,
+      "id": "BE_204",
+      "name": "Громадный Скользящий",
+      "cost": 6,
+      "rarity": "COMMON",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 129256,
+      "id": "BE_220",
+      "name": "Разлом энтропии",
+      "cost": 1,
+      "rarity": "COMMON",
+      "cardClass": "PRIEST",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 130401,
+      "id": "BE_221",
+      "name": "Древнее слово: предвидение",
+      "cost": 3,
+      "rarity": "RARE",
+      "cardClass": "PRIEST",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 130403,
+      "id": "BE_222",
+      "name": "Древнее слово: воплощение",
+      "cost": 5,
+      "rarity": "COMMON",
+      "cardClass": "PRIEST",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 130404,
+      "id": "BE_223",
+      "name": "Древнее слово: свежевание",
+      "cost": 1,
+      "rarity": "COMMON",
+      "cardClass": "PRIEST",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 130524,
+      "id": "BE_228",
+      "name": "Служитель Зурамата",
+      "cost": 1,
+      "rarity": "RARE",
+      "cardClass": "PRIEST",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 130281,
+      "id": "BE_726",
+      "name": "Ритуал К'Туна",
+      "cost": 1,
+      "rarity": "RARE",
+      "cardClass": "WARLOCK",
+      "set": "BE",
+      "type": "SPELL",
+      "collectible": true
+    },
+    {
+      "dbfId": 130769,
+      "id": "BE_733",
+      "name": "Молотобоец титанов",
+      "cost": 8,
+      "rarity": "COMMON",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 133415,
+      "id": "BE_861",
+      "name": "Кристаллический голем",
+      "cost": 4,
+      "rarity": "COMMON",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 131456,
+      "id": "BE_993",
+      "name": "Ночнокрыл",
+      "cost": 2,
+      "rarity": "RARE",
+      "cardClass": "NEUTRAL",
+      "set": "BE",
+      "type": "MINION",
+      "collectible": true
+    },
+    {
+      "dbfId": 134895,
+      "id": "TB_MultiClass_Hero_Anduin",
+      "name": "Андуин Ринн",
+      "rarity": "FREE",
+      "classes": [
+        "PRIEST",
+        "WARLOCK"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134893,
+      "id": "TB_MultiClass_Hero_Garrosh",
+      "name": "Гаррош Адский Крик",
+      "rarity": "FREE",
+      "classes": [
+        "DEATHKNIGHT",
+        "WARRIOR",
+        "DEMONHUNTER"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134896,
+      "id": "TB_MultiClass_Hero_Guldan",
+      "name": "Гул'дан",
+      "rarity": "FREE",
+      "classes": [
+        "PRIEST",
+        "WARLOCK"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134901,
+      "id": "TB_MultiClass_Hero_Illidan",
+      "name": "Иллидан Ярость Бури",
+      "rarity": "FREE",
+      "classes": [
+        "DEATHKNIGHT",
+        "WARRIOR",
+        "DEMONHUNTER"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134885,
+      "id": "TB_MultiClass_Hero_Jaina",
+      "name": "Джайна Праудмур",
+      "rarity": "FREE",
+      "classes": [
+        "MAGE",
+        "PALADIN",
+        "SHAMAN"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134902,
+      "id": "TB_MultiClass_Hero_Lich_King",
+      "name": "Король-лич",
+      "rarity": "FREE",
+      "classes": [
+        "DEATHKNIGHT",
+        "WARRIOR",
+        "DEMONHUNTER"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134899,
+      "id": "TB_MultiClass_Hero_Malfurion",
+      "name": "Малфурион Ярость Бури",
+      "rarity": "FREE",
+      "classes": [
+        "DRUID",
+        "HUNTER",
+        "ROGUE"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134900,
+      "id": "TB_MultiClass_Hero_Rexxar",
+      "name": "Рексар",
+      "rarity": "FREE",
+      "classes": [
+        "DRUID",
+        "HUNTER",
+        "ROGUE"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134898,
+      "id": "TB_MultiClass_Hero_Thrall",
+      "name": "Тралл",
+      "rarity": "FREE",
+      "classes": [
+        "MAGE",
+        "PALADIN",
+        "SHAMAN"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134894,
+      "id": "TB_MultiClass_Hero_Uther",
+      "name": "Утер Светоносный",
+      "rarity": "FREE",
+      "classes": [
+        "MAGE",
+        "PALADIN",
+        "SHAMAN"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    },
+    {
+      "dbfId": 134897,
+      "id": "TB_MultiClass_Hero_Valeera",
+      "name": "Валира Сангвинар",
+      "rarity": "FREE",
+      "classes": [
+        "DRUID",
+        "HUNTER",
+        "ROGUE"
+      ],
+      "set": "TB",
+      "type": "HERO"
+    }
+  ]
+}

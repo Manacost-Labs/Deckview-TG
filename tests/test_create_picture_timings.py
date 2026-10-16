@@ -53,6 +53,23 @@ class CreatePictureTimingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timings["generator_result"], "empty")
         self.assertIn("generator_total_ms", timings)
 
+    async def test_tavern_brawl_mode_is_named_for_bot_and_api(self):
+        response = {
+            "cards": [],
+            "class": {"id": 9, "name": "Чернокнижник", "slug": "warlock"},
+            "format": "tavern-brawl",
+        }
+        with (
+            patch.object(image_creator, "retrieve_deck", AsyncMock(return_value=(response, 9, []))),
+            patch.object(image_creator, "hydrate_deck_cards", AsyncMock()),
+            patch.object(image_creator, "download_cards", AsyncMock()),
+            patch.object(image_creator, "count_cards", AsyncMock(return_value=({}, {}))),
+            patch.object(image_creator, "get_cost_of_deck", AsyncMock(return_value=0)),
+            patch.object(image_creator, "place_cards", AsyncMock(return_value=object())),
+        ):
+            result = await image_creator.create_picture("brawl-code")
+        self.assertEqual(result[2:4], ("Чернокнижник", "Потасовка"))
+
 
 if __name__ == "__main__":
     unittest.main()

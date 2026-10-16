@@ -171,6 +171,8 @@ def _card_to_deckview(c: Dict[str, Any], dbf_id: int) -> Dict[str, Any]:
         "type": card_type,
         "rarity": rarity,
         "collectible": collectible,
+        "deckviewPlayerClass": c.get("cardClass"),
+        "deckviewClasses": list(c.get("classes") or []),
     }
 
 

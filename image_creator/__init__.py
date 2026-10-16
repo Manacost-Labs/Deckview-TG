@@ -117,6 +117,7 @@ async def create_picture(
             "wild": "Вольный",
             "classic": "Классический",
             "twist": "Потасовка",
+            "tavern-brawl": "Потасовка",
         }
         deck_mode_name = mode_map.get(format_raw, None)
         if timings is not None:
