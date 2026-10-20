@@ -10,8 +10,6 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from db.config import FOLDER
 
-# Максимальная сторона выходного изображения (уменьшаем для экономии размера файла)
-MAX_OUTPUT_SIDE = 1920
 from db.font import FONT, FONT_PATH
 from deckview.infrastructure.async_tools import to_thread
 
@@ -38,6 +36,7 @@ from .personalization import (
 )
 from .prepared_card_cache import load_prepared_card, store_prepared_card
 from .text_size import normalize_title_size, title_size_scale
+from .output_resolution import OUTPUT_SIDES, normalize_image_resolution
 
 
 IMAGE_STYLE_CLASSIC = "classic"
@@ -162,7 +161,9 @@ def _build_rust_payload(
     image_class_art=None,
     image_layout=None,
     image_mana_curve=None,
+    image_resolution="standard",
 ):
+    image_resolution = normalize_image_resolution(image_resolution)
     image_style = normalize_image_style(image_style)
     normalized_font = normalize_font_key(image_font)
     normalized_text_size = normalize_title_size(image_text_size)
@@ -325,8 +326,8 @@ def _build_rust_payload(
         },
         "runes": rune_assets,
         "output": {
-            "max_output_side": MAX_OUTPUT_SIDE,
-            "jpeg_quality": 92,
+            "max_output_side": OUTPUT_SIDES[image_resolution],
+            "jpeg_quality": 95 if image_resolution == "high" else 92,
         },
         "deck": {
             "cost": int(deck_cost or 0),
@@ -351,6 +352,7 @@ def _place_cards_rust(
     image_class_art=None,
     image_layout=None,
     image_mana_curve=None,
+    image_resolution="standard",
 ):
     if not _rust_render_enabled():
         return None
@@ -373,10 +375,12 @@ def _place_cards_rust(
             image_class_art=image_class_art,
             image_layout=image_layout,
             image_mana_curve=image_mana_curve,
+            image_resolution=image_resolution,
         )
         image_bytes = render_deck_image(payload)
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
         image.info["deckview_renderer"] = "rust"
+        image.info["deckview_image_resolution"] = image_resolution
         # Downstream API/Telegram delivery can persist the native JPEG without
         # paying for a second Pillow encode. Keep the PIL image for the public
         # Python contract and visual fallback compatibility.
@@ -881,7 +885,10 @@ def place_cards(
     image_class_art=None,
     image_layout=None,
     image_mana_curve=None,
+    image_resolution="standard",
 ):
+    image_resolution = normalize_image_resolution(image_resolution)
+    max_output_side = OUTPUT_SIDES[image_resolution]
     image_style = normalize_image_style(image_style)
     normalized_font = normalize_font_key(image_font)
     normalized_text_size = normalize_title_size(image_text_size)
@@ -927,6 +934,7 @@ def place_cards(
         image_class_art=class_art,
         image_layout=image_layout,
         image_mana_curve=mana_curve,
+        image_resolution=image_resolution,
     )
     if rust_image is not None:
         return rust_image
@@ -1511,11 +1519,11 @@ def place_cards(
         framed_canvas.alpha_composite(image.convert("RGBA"), (padding, padding))
         image = framed_canvas.convert("RGB")
 
-    # Уменьшаем изображение, если больше MAX_OUTPUT_SIDE — сохраняем качество и сильно снижаем размер файла
+    # Keep the original composition for HQ; never upscale a smaller canvas.
     w, h = image.size
     output_scale = 1.0
-    if w > MAX_OUTPUT_SIDE or h > MAX_OUTPUT_SIDE:
-        scale = MAX_OUTPUT_SIDE / max(w, h)
+    if w > max_output_side or h > max_output_side:
+        scale = max_output_side / max(w, h)
         output_scale = scale
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
@@ -1532,4 +1540,5 @@ def place_cards(
             wood_frame_overlay(image.size, destination_slice=frame_width),
         ).convert("RGB")
     image.info["deckview_renderer"] = "pillow"
+    image.info["deckview_image_resolution"] = image_resolution
     return image

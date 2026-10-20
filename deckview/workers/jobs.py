@@ -34,6 +34,7 @@ from deckview.integrations.hsguru_archetype import get_cached_archetype, recogni
 from deckview.integrations.hsguru_fetch import get_new_decks, mark_deck_published
 from image_creator import create_picture
 from image_creator.jpeg_output import write_rendered_jpeg
+from image_creator.output_resolution import normalize_image_resolution
 from image_creator.font_catalog import normalize_font_key
 from image_creator.personalization import (
     normalize_class_art_mode,
@@ -318,7 +319,10 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
     cache_style = str(payload.get("cache_style") or image_style).strip().lower()
     if ":layout:auto-v7" not in cache_style:
         cache_style = f"{cache_style}:layout:auto-v7"
-    render_kwargs = {}
+    image_resolution = normalize_image_resolution(payload.get("image_resolution"))
+    render_kwargs = (
+        {"image_resolution": image_resolution} if image_resolution != "standard" else {}
+    )
     if image_style != "classic":
         render_kwargs.update(
             {
@@ -342,6 +346,8 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
     if image_mana_curve["mode"] != "chart" or image_mana_curve.get("path"):
         render_kwargs["image_mana_curve"] = image_mana_curve
     cache_kwargs = {"image_style": cache_style} if cache_style != "classic" else {}
+    if image_resolution != "standard":
+        cache_kwargs["image_resolution"] = image_resolution
     chat_id = payload["chat_id"]
     message_thread_id = payload.get("message_thread_id")
     download_key = uuid.uuid4().hex[:12]
@@ -361,9 +367,10 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
         timings["cache_lookup_ms"] = round((time.perf_counter_ns() - started) / 1_000_000, 3)
         telegram_photo_file_id = None
         if cache_entry is not None:
-            telegram_photo_file_id = get_telegram_photo_file_id(
-                cache_entry.get("cache_key")
-            )
+            if image_resolution == "standard":
+                telegram_photo_file_id = get_telegram_photo_file_id(
+                    cache_entry.get("cache_key")
+                )
             if telegram_photo_file_id:
                 # Telegram already owns this exact image. Avoid touching the
                 # render artifact on disk unless Telegram rejects a stale ID.
@@ -388,6 +395,7 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
                 deck_code,
                 deck_name,
                 cache_style,
+                **({"image_resolution": image_resolution} if image_resolution != "standard" else {}),
             )
             timings["render_lock_ms"] = round(
                 (time.perf_counter_ns() - lock_started) / 1_000_000,
@@ -402,7 +410,7 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
                     scope="telegram",
                     **cache_kwargs,
                 )
-                if cache_entry is not None:
+                if cache_entry is not None and image_resolution == "standard":
                     telegram_photo_file_id = get_telegram_photo_file_id(
                         cache_entry.get("cache_key")
                     )
@@ -553,46 +561,55 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
         started = time.perf_counter_ns()
-        photo = telegram_photo_file_id or FSInputFile(tmp_path)
-        try:
-            sent_message = await bot.send_photo(
+        if image_resolution == "high":
+            await bot.send_document(
                 chat_id,
-                photo,
+                FSInputFile(tmp_path, filename="deck-high.jpg"),
                 caption=caption,
                 reply_markup=action_keyboard,
                 **_delivery_kwargs(payload),
             )
-        except TelegramBadRequest as exc:
-            if (
-                not telegram_photo_file_id
-                or not cache_entry
-                or not _is_stale_telegram_file_id(exc)
-            ):
-                raise
-            materialize_started = time.perf_counter_ns()
-            materialized = materialize_render_cache(cache_entry, tmp_path)
-            timings["stale_file_materialize_ms"] = round(
-                (time.perf_counter_ns() - materialize_started) / 1_000_000,
-                3,
-            )
-            if not materialized or not os.path.isfile(tmp_path):
-                raise
-            delete_telegram_photo_file_id(cache_entry.get("cache_key"))
-            telegram_photo_file_id = None
-            timings["cache_status"] = "telegram_file_id_stale"
-            sent_message = await bot.send_photo(
-                chat_id,
-                FSInputFile(tmp_path),
-                caption=caption,
-                reply_markup=action_keyboard,
-                **_delivery_kwargs(payload),
-            )
-        if not telegram_photo_file_id and cache_entry is not None:
-            photos = getattr(sent_message, "photo", None)
-            largest_photo = photos[-1] if photos else None
-            file_id = getattr(largest_photo, "file_id", None)
-            if isinstance(file_id, str) and file_id:
-                store_telegram_photo_file_id(cache_entry.get("cache_key"), file_id)
+        else:
+            photo = telegram_photo_file_id or FSInputFile(tmp_path)
+            try:
+                sent_message = await bot.send_photo(
+                    chat_id,
+                    photo,
+                    caption=caption,
+                    reply_markup=action_keyboard,
+                    **_delivery_kwargs(payload),
+                )
+            except TelegramBadRequest as exc:
+                if (
+                    not telegram_photo_file_id
+                    or not cache_entry
+                    or not _is_stale_telegram_file_id(exc)
+                ):
+                    raise
+                materialize_started = time.perf_counter_ns()
+                materialized = materialize_render_cache(cache_entry, tmp_path)
+                timings["stale_file_materialize_ms"] = round(
+                    (time.perf_counter_ns() - materialize_started) / 1_000_000,
+                    3,
+                )
+                if not materialized or not os.path.isfile(tmp_path):
+                    raise
+                delete_telegram_photo_file_id(cache_entry.get("cache_key"))
+                telegram_photo_file_id = None
+                timings["cache_status"] = "telegram_file_id_stale"
+                sent_message = await bot.send_photo(
+                    chat_id,
+                    FSInputFile(tmp_path),
+                    caption=caption,
+                    reply_markup=action_keyboard,
+                    **_delivery_kwargs(payload),
+                )
+            if not telegram_photo_file_id and cache_entry is not None:
+                photos = getattr(sent_message, "photo", None)
+                largest_photo = photos[-1] if photos else None
+                file_id = getattr(largest_photo, "file_id", None)
+                if isinstance(file_id, str) and file_id:
+                    store_telegram_photo_file_id(cache_entry.get("cache_key"), file_id)
         timings["delivery_ms"] = round((time.perf_counter_ns() - started) / 1_000_000, 3)
         status_started = time.perf_counter_ns()
         await _delete_status(bot, payload)
@@ -652,6 +669,14 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
     if image_style not in {"classic", "parchment"}:
         return {"success": False, "error_code": "INVALID_IMAGE_STYLE"}
 
+    try:
+        image_resolution = normalize_image_resolution(payload.get("image_resolution"))
+    except ValueError:
+        return {"success": False, "error_code": "INVALID_IMAGE_RESOLUTION"}
+    resolution_kwargs = (
+        {"image_resolution": image_resolution} if image_resolution != "standard" else {}
+    )
+
     timings: dict[str, Any] = {"cache_status": "miss"}
     queued_at_ns = int(payload.get("_queued_at_ns") or 0)
     if queued_at_ns > 0:
@@ -669,11 +694,12 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
             deck_name,
             scope="api",
             image_style=image_style,
+            **resolution_kwargs,
         )
         if cached is not None:
             timings["cache_status"] = "worker_cache_hit"
             result_status = "ok"
-            return {"success": True, "cached": True, **cached}
+            return {"success": True, "cached": True, **cached, "image_resolution": image_resolution}
 
         lock_started = time.perf_counter_ns()
         render_lock = await asyncio.to_thread(
@@ -681,6 +707,7 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
             deck_code,
             deck_name,
             image_style,
+            **resolution_kwargs,
         )
         timings["render_lock_ms"] = round(
             (time.perf_counter_ns() - lock_started) / 1_000_000,
@@ -692,17 +719,19 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
                 deck_name,
                 scope="api",
                 image_style=image_style,
+                **resolution_kwargs,
             )
             if cached is not None:
                 timings["cache_status"] = "singleflight_cache_hit"
                 result_status = "ok"
-                return {"success": True, "cached": True, **cached}
+                return {"success": True, "cached": True, **cached, "image_resolution": image_resolution}
 
         image, cost, deck_class, deck_mode, card_dbf_ids = await create_picture(
             deck_code,
             deck_name=deck_name,
             timings=timings,
             image_style=image_style,
+            **resolution_kwargs,
         )
         if image is None:
             result_status = "empty"
@@ -735,6 +764,7 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
             deck_mode=deck_mode,
             card_dbf_ids=card_dbf_ids,
             image_style=image_style,
+            **resolution_kwargs,
             generate_preview=True,
         )
         if stored and stored.get("preview_prepare_ms") is not None:
@@ -763,7 +793,7 @@ async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:
             user_id=None,
         )
         result_status = "ok"
-        return {"success": True, "cached": False, **entry}
+        return {"success": True, "cached": False, **entry, "image_resolution": image_resolution}
     except Exception as exc:
         timings["error_type"] = type(exc).__name__
         return {

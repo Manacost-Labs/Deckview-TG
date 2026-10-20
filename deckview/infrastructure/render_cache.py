@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from PIL import Image
+from image_creator.output_resolution import normalize_image_resolution
 
 from deckview.config import DECKVIEW_REDIS_URL, HSJSON_BUILD, HSJSON_LOCALE, WEB_DATABASE_PATH
 
@@ -185,6 +186,7 @@ def build_render_cache_key(
     deck_code: str,
     deck_name: str | None,
     image_style: str = "classic",
+    image_resolution: str = "standard",
 ) -> str:
     payload = {
         **_versions(),
@@ -194,6 +196,9 @@ def build_render_cache_key(
     style = _normalized_image_style(image_style)
     if style != "classic":
         payload["image_style"] = style
+    resolution = normalize_image_resolution(image_resolution)
+    if resolution != "standard":
+        payload["image_resolution"] = resolution
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -202,6 +207,7 @@ def acquire_render_lock(
     deck_code: str,
     deck_name: str | None,
     image_style: str = "classic",
+    image_resolution: str = "standard",
 ):
     """Serialize identical renders across all workers; fail open on Redis errors."""
     global _redis_client
@@ -216,7 +222,7 @@ def acquire_render_lock(
                         socket_connect_timeout=1,
                         socket_timeout=2,
                     )
-        cache_key = build_render_cache_key(deck_code, deck_name, image_style)
+        cache_key = build_render_cache_key(deck_code, deck_name, image_style, image_resolution)
         lock = _redis_client.lock(
             f"deckview:render:{cache_key}",
             timeout=max(30.0, float(os.getenv("DECKVIEW_RENDER_LOCK_TTL", "120"))),
@@ -245,6 +251,7 @@ def _deck_identity_hash(
     deck_code: str,
     deck_name: str | None,
     image_style: str = "classic",
+    image_resolution: str = "standard",
 ) -> str:
     identity_payload = {
         "deck_code": (deck_code or "").strip(),
@@ -253,6 +260,9 @@ def _deck_identity_hash(
     style = _normalized_image_style(image_style)
     if style != "classic":
         identity_payload["image_style"] = style
+    resolution = normalize_image_resolution(image_resolution)
+    if resolution != "standard":
+        identity_payload["image_resolution"] = resolution
     identity = json.dumps(
         identity_payload,
         ensure_ascii=False,
@@ -457,6 +467,7 @@ def store_render_cache(
     deck_mode: str | None,
     card_dbf_ids: Iterable[int],
     image_style: str = "classic",
+    image_resolution: str = "standard",
     generate_preview: bool = False,
 ) -> dict[str, Any] | None:
     """Store an existing JPEG without re-encoding it. Any failure is a cache miss."""
@@ -465,7 +476,7 @@ def store_render_cache(
 
     try:
         source = Path(source_path).resolve(strict=True)
-        cache_key = build_render_cache_key(deck_code, deck_name, image_style)
+        cache_key = build_render_cache_key(deck_code, deck_name, image_style, image_resolution)
         target, artifact_relpath = _artifact_path(cache_key)
         _ensure_public_artifact_path(target)
         if not target.is_file():
@@ -526,7 +537,7 @@ def store_render_cache(
                 (
                     cache_key,
                     _KEY_VERSION,
-                    _deck_identity_hash(deck_code, deck_name, image_style),
+                    _deck_identity_hash(deck_code, deck_name, image_style, image_resolution),
                     versions["renderer"],
                     versions["template"],
                     versions["card_data"],
@@ -548,6 +559,7 @@ def store_render_cache(
             "deck_code": (deck_code or "").strip(),
             "deck_name": (deck_name or "").strip() or None,
             "image_style": _normalized_image_style(image_style),
+            "image_resolution": normalize_image_resolution(image_resolution),
             "filename": artifact_relpath,
             "artifact_relpath": artifact_relpath,
             "artifact_path": str(target),
@@ -573,13 +585,14 @@ def lookup_render_cache(
     *,
     scope: str | None = None,
     image_style: str = "classic",
+    image_resolution: str = "standard",
 ) -> dict[str, Any] | None:
     """Return a valid current-version entry, otherwise fail open as a miss."""
     if not render_cache_read_enabled(scope):
         return None
 
     try:
-        cache_key = build_render_cache_key(deck_code, deck_name, image_style)
+        cache_key = build_render_cache_key(deck_code, deck_name, image_style, image_resolution)
         hot = _hot_cache_get(cache_key)
         if hot is not None:
             if scope == "api":
@@ -608,6 +621,7 @@ def lookup_render_cache(
             "deck_code": (deck_code or "").strip(),
             "deck_name": (deck_name or "").strip() or None,
             "image_style": _normalized_image_style(image_style),
+            "image_resolution": normalize_image_resolution(image_resolution),
             "filename": expected_relpath,
             "artifact_path": str(target),
             "cost": row["cost"],

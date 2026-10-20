@@ -350,6 +350,7 @@ async def _set_bot_commands() -> None:
             BotCommand(command="findwith", description="Найти колоды по картам"),
             BotCommand(command="profile", description="Профиль и Manacost ID"),
             BotCommand(command="settings", description="Оформление картинок"),
+            BotCommand(command="hq", description="Колода файлом до 3840 px без сжатия"),
             BotCommand(command="healt", description="Диагностика бота"),
         ])
     except Exception as e:
@@ -3476,6 +3477,7 @@ async def cmd_help(message: types.Message):
         "\n"
         "🃏 <b>Колоды</b>\n"
         "• Отправьте код колоды (<code>AA…</code>) — пришлю изображение\n"
+        "• <b>/hq</b> <code>AA…</code> — JPG до 3840 px файлом без сжатия Telegram\n"
         "• <b>/meta</b> — текущая мета Стандарт/Вольный: архетипы, винрейт, коды колод\n"
         "• <b>/arena</b> — актуальные винрейты классов на Арене\n"
         "• <b>/compare</b> <code>AA… AA…</code> — сравнить две колоды по составу карт\n"
@@ -5936,7 +5938,10 @@ def _include_router_once() -> None:
     # cannot consume their commands.  New features must be registered in the
     # package composition root instead of growing this module.
     dp.include_router(
-        create_modular_router(is_admin=is_admin, started_at=_BOT_START_TIME)
+        create_modular_router(
+            is_admin=is_admin, started_at=_BOT_START_TIME,
+            image_theme_provider=_image_theme_for_context,
+        )
     )
     dp.include_router(router)
     _ROUTER_INCLUDED = True

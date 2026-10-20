@@ -6,6 +6,7 @@ from .cards_placer import place_cards
 from .cost_getter import get_cost_of_deck
 from .deck_retriever import retrieve_deck
 from .deck_card_sources import hydrate_deck_cards
+from .output_resolution import normalize_image_resolution
 
 
 def _elapsed_ms(started_ns):
@@ -24,8 +25,10 @@ async def create_picture(
     image_class_art=None,
     image_layout=None,
     image_mana_curve=None,
+    image_resolution="standard",
 ):
     """Create a deck image and optionally populate per-request stage timings."""
+    image_resolution = normalize_image_resolution(image_resolution)
     generator_started = time.perf_counter_ns()
     stage = "deck_resolve"
     try:
@@ -97,6 +100,7 @@ async def create_picture(
             image_class_art=image_class_art,
             image_layout=image_layout,
             image_mana_curve=image_mana_curve,
+            image_resolution=image_resolution,
         )
         if timings is not None:
             timings["image_compose_ms"] = _elapsed_ms(started)

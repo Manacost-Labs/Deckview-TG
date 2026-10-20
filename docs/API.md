@@ -135,6 +135,34 @@ Request body:
 
 `deck_name` is optional. If omitted, the image is generated without a custom title.
 
+`image_resolution` accepts `standard` (default, up to 1920 px on the longest
+side) or `high` (up to 3840 px). High resolution preserves the original card
+composition before the final reduction; it never enlarges a smaller canvas.
+It uses JPEG quality 95 and 4:4:4 color sampling. Each resolution has a separate
+render cache and async job identity. Unsupported values return HTTP 400 with
+`INVALID_IMAGE_RESOLUTION`.
+
+For article images without a heading:
+
+```json
+{
+  "deck_code": "AAEC...",
+  "image_style": "parchment",
+  "image_resolution": "high",
+  "async": true
+}
+```
+
+The same parameter works with GET and all public render aliases. Both immediate
+responses and completed async job responses report `image_resolution`.
+Use `image_url` for the original; `preview_image_url` remains a small preview.
+
+In Telegram, send `/hq DECK_CODE` (optionally followed by a title). The bot uses
+your current image design and delivers the high resolution JPG as a document,
+without Telegram photo compression. This command requires the render queue;
+if the queue is unavailable, it asks you to retry. Regular deck messages keep
+their current photo delivery and resolution.
+
 ### Render With cURL
 
 ```bash

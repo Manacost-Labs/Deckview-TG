@@ -43,10 +43,15 @@ def write_rendered_jpeg(
     if encoded is not None:
         target.write_bytes(encoded)
     else:
+        info = getattr(image, "info", {})
+        high_resolution = (
+            isinstance(info, dict) and info.get("deckview_image_resolution") == "high"
+        )
         image.save(
             target,
             format="JPEG",
-            quality=quality,
+            quality=95 if high_resolution else quality,
+            **({"subsampling": 0} if high_resolution else {}),
             optimize=optimize,
             progressive=progressive,
         )

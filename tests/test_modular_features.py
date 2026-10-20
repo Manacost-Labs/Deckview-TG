@@ -12,7 +12,7 @@ class ModularRouterTest(unittest.TestCase):
         router = create_modular_router()
         self.assertEqual("deckview", router.name)
         self.assertEqual(
-            ["arena", "battlegrounds", "health"],
+            ["high_resolution", "arena", "battlegrounds", "health"],
             [child.name for child in router.sub_routers],
         )
         self.assertEqual({"message", "callback_query"}, set(router.resolve_used_update_types()))

@@ -34,6 +34,7 @@ from deckview.integrations.hsguru_fetch import (
 )
 from image_creator import create_picture
 from image_creator.jpeg_output import write_rendered_jpeg
+from image_creator.output_resolution import normalize_image_resolution
 from deckview.infrastructure.perf_telemetry import emit_render_timing
 from deckview.bot.publishing import publish_deck
 from deckview.infrastructure.render_cache import (
@@ -133,6 +134,7 @@ def _run_create_picture(
     timings=None,
     *,
     image_style="classic",
+    image_resolution="standard",
 ):
     """
     Запускает create_picture в отдельном OS-потоке с собственным asyncio event loop.
@@ -153,6 +155,7 @@ def _run_create_picture(
                     deck_name=deck_name,
                     timings=worker_timings,
                     image_style=image_style,
+                    **({"image_resolution": image_resolution} if image_resolution != "standard" else {}),
                 )
             )
             result_holder.append(res)
@@ -494,6 +497,20 @@ def deckview_api_render():
             status=400,
         )
 
+    try:
+        image_resolution = normalize_image_resolution(
+            data.get("image_resolution", request.args.get("image_resolution"))
+        )
+    except ValueError as exc:
+        return _api_json_response(
+            {"success": False, "error": str(exc), "error_code": "INVALID_IMAGE_RESOLUTION"},
+            started_ns=handler_started,
+            status=400,
+        )
+    resolution_kwargs = (
+        {"image_resolution": image_resolution} if image_resolution != "standard" else {}
+    )
+
     deck_code = (
         data.get("deck_code")
         or request.args.get("deck_code")
@@ -527,10 +544,12 @@ def deckview_api_render():
             deck_name,
             scope="api",
             image_style=image_style,
+            **resolution_kwargs,
         )
         source = "render_cache"
         if (
             cached_result is None
+            and image_resolution == "standard"
             and image_style == "classic"
             and _legacy_render_cache_read_enabled()
         ):
@@ -570,6 +589,7 @@ def deckview_api_render():
                 "cached": True,
                 "cache_layer": layer or source,
                 "image_style": image_style,
+                "image_resolution": image_resolution,
                 "deck_code": cached_result["deck_code"],
                 "deck_name": cached_result.get("deck_name"),
                 "cost": cached_result["cost"],
@@ -590,12 +610,13 @@ def deckview_api_render():
         return cached_response(cached, cache_source)
 
     if _wants_async_render(data):
-        cache_key = build_render_cache_key(deck_code, deck_name, image_style)
+        cache_key = build_render_cache_key(deck_code, deck_name, image_style, **resolution_kwargs)
         job_id = enqueue_api_render(
             {
                 "deck_code": deck_code,
                 "deck_name": deck_name,
                 "image_style": image_style,
+                "image_resolution": image_resolution,
                 "trace_id": trace_id,
             },
             job_id=f"api-render-{cache_key}",
@@ -608,6 +629,7 @@ def deckview_api_render():
                     "state": "queued",
                     "job_id": job_id,
                     "image_style": image_style,
+                    "image_resolution": image_resolution,
                     "status_url": url_for(
                         "deckview_api_render_job",
                         job_id=job_id,
@@ -625,7 +647,7 @@ def deckview_api_render():
     result_status = "error"
     render_lock = None
     try:
-        render_lock = acquire_render_lock(deck_code, deck_name, image_style)
+        render_lock = acquire_render_lock(deck_code, deck_name, image_style, **resolution_kwargs)
         if render_lock is not None:
             # Another worker may have completed the same image while this
             # request was waiting for the Redis lock.
@@ -644,6 +666,7 @@ def deckview_api_render():
             deck_name,
             timings=timings,
             image_style=image_style,
+            **resolution_kwargs,
         )
 
         if image is None:
@@ -680,6 +703,7 @@ def deckview_api_render():
             deck_mode=deck_mode_name,
             card_dbf_ids=card_dbf_ids,
             image_style=image_style,
+            **resolution_kwargs,
             generate_preview=True,
         )
         timings["cache_store_ms"] = round((time.perf_counter_ns() - started) / 1_000_000, 3)
@@ -709,6 +733,7 @@ def deckview_api_render():
                 "cached": False,
                 "cache_layer": None,
                 "image_style": image_style,
+                "image_resolution": image_resolution,
                 "deck_code": deck_code,
                 "deck_name": deck_name,
                 "cost": cost,
@@ -808,6 +833,7 @@ def deckview_api_render_job(job_id):
                 "job_id": job_id,
                 "cached": bool(result.get("cached")),
                 "image_style": result.get("image_style") or "parchment",
+                "image_resolution": result.get("image_resolution") or "standard",
                 "deck_code": result.get("deck_code"),
                 "deck_name": result.get("deck_name"),
                 "cost": result.get("cost"),

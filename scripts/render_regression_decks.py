@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from image_creator import create_picture  # noqa: E402
+from image_creator.jpeg_output import write_rendered_jpeg  # noqa: E402
 from image_creator.deck_retriever import _decode_deckstring  # noqa: E402
 
 
@@ -76,6 +77,7 @@ async def render_deck(
     deck: RegressionDeck,
     output_dir: Path,
     style: str,
+    resolution: str = "standard",
 ) -> dict[str, object]:
     counts = validate_deck(deck)
     timings: dict[str, object] = {}
@@ -84,6 +86,7 @@ async def render_deck(
         deck_name=deck.title,
         timings=timings,
         image_style=style,
+        image_resolution=resolution,
     )
     if image is None:
         raise RuntimeError(f"{deck.slug}: renderer returned no image")
@@ -92,12 +95,13 @@ async def render_deck(
     output_path = output_dir / f"{deck.slug}.jpg"
     if image.mode != "RGB":
         image = image.convert("RGB")
-    image.save(output_path, format="JPEG", quality=90, optimize=True)
+    write_rendered_jpeg(image, output_path, quality=90)
     return {
         "deck": deck.slug,
         "title": deck.title,
         "path": str(output_path.resolve()),
         "size": list(image.size),
+        "image_resolution": resolution,
         "dust": dust,
         "class": deck_class,
         "mode": mode,
@@ -118,11 +122,12 @@ async def main() -> int:
         choices=("classic", "parchment"),
         default="parchment",
     )
+    parser.add_argument("--resolution", choices=("standard", "high"), default="standard")
     args = parser.parse_args()
 
     results = []
     for deck in RENO_DECKS:
-        result = await render_deck(deck, args.output_dir, args.style)
+        result = await render_deck(deck, args.output_dir, args.style, args.resolution)
         results.append(result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
