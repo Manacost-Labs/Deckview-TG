@@ -33,7 +33,7 @@ from deckview.config import (
 from deckview.integrations.hsguru_archetype import get_cached_archetype, recognize_archetype
 from deckview.integrations.hsguru_fetch import get_new_decks, mark_deck_published
 from image_creator import create_picture
-from image_creator.jpeg_output import write_rendered_jpeg
+from image_creator.jpeg_output import write_rendered_jpeg, write_telegram_photo_jpeg
 from image_creator.output_resolution import normalize_image_resolution
 from image_creator.font_catalog import normalize_font_key
 from image_creator.personalization import (
@@ -43,6 +43,12 @@ from image_creator.personalization import (
 )
 from image_creator.text_size import normalize_title_size
 from deckview.infrastructure.perf_telemetry import emit_render_timing
+from deckview.services.deck_errors import (
+    RENDER_FAILED,
+    RENDER_TIMED_OUT,
+    UNREADABLE_DECK_CODE,
+    friendly_deck_error,
+)
 from deckview.bot.publishing import publish_deck
 from deckview.infrastructure.render_cache import (
     acquire_render_lock,
@@ -102,29 +108,6 @@ def _caption_with_archetype(caption: str, archetype_info: dict | None) -> str:
     return f"<b>Архетип:</b> {html.escape(archetype_name)}{suffix}\n{caption}"
 
 
-def _friendly_deck_error(exc: Exception) -> str:
-    err_text = str(exc)
-    err_lower = err_text.lower()
-    if "invalid rune costs" in err_lower:
-        return (
-            "⚠️ Этот код колоды содержит недействительные руны.\n"
-            "Скорее всего, колода создана в старом патче — обновите её в клиенте и скопируйте код заново."
-        )
-    if "invalid hero" in err_lower:
-        return (
-            "⚠️ Герой в этом коде колоды больше не существует в API.\n"
-            "Возможно, колода устарела — попробуйте обновить её в клиенте Hearthstone."
-        )
-    if "unsupported string format or version" in err_lower:
-        return (
-            "⚠️ Этот формат кода колоды не поддерживается.\n"
-            "Убедитесь, что код скопирован из актуальной версии Hearthstone."
-        )
-    if "BATTLE_NET_TOKEN" in err_text or "401" in err_text or "403" in err_text:
-        return "Ошибка доступа к Blizzard API: токен недействителен или истёк. Обратитесь к администратору."
-    return f"Ошибка при создании картинки: {err_text[:400]}"
-
-
 def _message_kwargs(message_thread_id: int | None) -> dict[str, Any]:
     if message_thread_id is None:
         return {}
@@ -142,6 +125,21 @@ def _delivery_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return kwargs
+
+
+async def _prepare_photo_upload(tmp_path: str, timings: dict[str, Any]) -> str | None:
+    """Encode a lighter ``send_photo`` copy; ``tmp_path`` stays the download artifact."""
+    upload_path = f"{os.path.splitext(tmp_path)[0]}_tg.jpg"
+    started = time.perf_counter_ns()
+    try:
+        written = await asyncio.to_thread(write_telegram_photo_jpeg, tmp_path, upload_path)
+    except Exception as exc:
+        print(f"[Deckview worker] Telegram photo copy failed, uploading source: {exc}")
+        with contextlib.suppress(OSError):
+            os.remove(upload_path)
+        written = False
+    timings["telegram_photo_ms"] = round((time.perf_counter_ns() - started) / 1_000_000, 3)
+    return upload_path if written else None
 
 
 def _is_stale_telegram_file_id(exc: TelegramBadRequest) -> bool:
@@ -448,7 +446,7 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             except Exception as exc:
                 result_status = "invalid" if any(error in str(exc).lower() for error in _BAD_DECK_ERRORS) else "error"
-                await _send_or_edit_error(bot, payload, _friendly_deck_error(exc))
+                await _send_or_edit_error(bot, payload, friendly_deck_error(exc))
                 add_bot_event(
                     "error",
                     payload.get("chat_type") or "",
@@ -458,11 +456,7 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
 
         if cache_entry is None and not image:
             result_status = "empty"
-            await _send_or_edit_error(
-                bot,
-                payload,
-                "Не удалось расшифровать колоду по этому коду. Проверьте код или настройки бота (BATTLE_NET_TOKEN).",
-            )
+            await _send_or_edit_error(bot, payload, UNREADABLE_DECK_CODE)
             add_bot_event(
                 "error",
                 payload.get("chat_type") or "",
@@ -570,40 +564,49 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
                 **_delivery_kwargs(payload),
             )
         else:
-            photo = telegram_photo_file_id or FSInputFile(tmp_path)
+            upload_path = None
             try:
-                sent_message = await bot.send_photo(
-                    chat_id,
-                    photo,
-                    caption=caption,
-                    reply_markup=action_keyboard,
-                    **_delivery_kwargs(payload),
-                )
-            except TelegramBadRequest as exc:
-                if (
-                    not telegram_photo_file_id
-                    or not cache_entry
-                    or not _is_stale_telegram_file_id(exc)
-                ):
-                    raise
-                materialize_started = time.perf_counter_ns()
-                materialized = materialize_render_cache(cache_entry, tmp_path)
-                timings["stale_file_materialize_ms"] = round(
-                    (time.perf_counter_ns() - materialize_started) / 1_000_000,
-                    3,
-                )
-                if not materialized or not os.path.isfile(tmp_path):
-                    raise
-                delete_telegram_photo_file_id(cache_entry.get("cache_key"))
-                telegram_photo_file_id = None
-                timings["cache_status"] = "telegram_file_id_stale"
-                sent_message = await bot.send_photo(
-                    chat_id,
-                    FSInputFile(tmp_path),
-                    caption=caption,
-                    reply_markup=action_keyboard,
-                    **_delivery_kwargs(payload),
-                )
+                if not telegram_photo_file_id:
+                    upload_path = await _prepare_photo_upload(tmp_path, timings)
+                photo = telegram_photo_file_id or FSInputFile(upload_path or tmp_path)
+                try:
+                    sent_message = await bot.send_photo(
+                        chat_id,
+                        photo,
+                        caption=caption,
+                        reply_markup=action_keyboard,
+                        **_delivery_kwargs(payload),
+                    )
+                except TelegramBadRequest as exc:
+                    if (
+                        not telegram_photo_file_id
+                        or not cache_entry
+                        or not _is_stale_telegram_file_id(exc)
+                    ):
+                        raise
+                    materialize_started = time.perf_counter_ns()
+                    materialized = materialize_render_cache(cache_entry, tmp_path)
+                    timings["stale_file_materialize_ms"] = round(
+                        (time.perf_counter_ns() - materialize_started) / 1_000_000,
+                        3,
+                    )
+                    if not materialized or not os.path.isfile(tmp_path):
+                        raise
+                    delete_telegram_photo_file_id(cache_entry.get("cache_key"))
+                    telegram_photo_file_id = None
+                    timings["cache_status"] = "telegram_file_id_stale"
+                    upload_path = await _prepare_photo_upload(tmp_path, timings)
+                    sent_message = await bot.send_photo(
+                        chat_id,
+                        FSInputFile(upload_path or tmp_path),
+                        caption=caption,
+                        reply_markup=action_keyboard,
+                        **_delivery_kwargs(payload),
+                    )
+            finally:
+                if upload_path:
+                    with contextlib.suppress(OSError):
+                        os.remove(upload_path)
             if not telegram_photo_file_id and cache_entry is not None:
                 photos = getattr(sent_message, "photo", None)
                 largest_photo = photos[-1] if photos else None
@@ -627,7 +630,7 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         print(f"[Deckview worker] Unhandled render error: {exc}\n{traceback.format_exc()}")
         try:
-            await _send_or_edit_error(bot, payload, f"Ошибка при создании картинки: {str(exc)[:400]}")
+            await _send_or_edit_error(bot, payload, RENDER_FAILED)
         except Exception:
             pass
         return {"ok": False, "error": str(exc)}
@@ -654,6 +657,29 @@ async def _render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
 
 def render_deck_message_job(payload: dict[str, Any]) -> dict[str, Any]:
     return asyncio.run(_render_deck_message_job(payload))
+
+
+async def _replace_status_after_failure(payload: dict[str, Any]) -> None:
+    bot = _build_bot()
+    try:
+        await _send_or_edit_error(bot, payload, RENDER_TIMED_OUT)
+    finally:
+        await bot.session.close()
+
+
+def render_deck_message_failed(job: Any, connection: Any, *exc_info: Any) -> None:
+    """RQ ``on_failure``/``on_stopped`` hook for failures the job cannot catch.
+
+    The job reports its own errors; this only fires when RQ aborts it (timeout,
+    stop), which would otherwise leave the "Собираю колоду" status forever.
+    """
+    payload = job.args[0] if getattr(job, "args", None) else None
+    if not isinstance(payload, dict) or not payload.get("chat_id"):
+        return
+    try:
+        asyncio.run(_replace_status_after_failure(payload))
+    except Exception as exc:
+        print(f"[Deckview worker] Failed to report aborted render {job.id}: {exc}")
 
 
 async def _render_api_deck_job(payload: dict[str, Any]) -> dict[str, Any]:

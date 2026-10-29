@@ -30,6 +30,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BufferedInputFile,
     BotCommand,
+    BotCommandScopeChat,
     CopyTextButton,
     FSInputFile,
     InlineKeyboardButton,
@@ -130,6 +131,7 @@ from deckview.services.deck_download_service import (
     build_download_reference,
     resolve_cached_download,
 )
+from deckview.services.deck_errors import UNREADABLE_DECK_CODE, friendly_deck_error
 from deckview.services.meta_service import (
     META_SOURCE_LIMIT,
     META_VIEW_LIMIT,
@@ -337,24 +339,37 @@ def is_admin(user_id: int) -> bool:
 
 async def _set_bot_commands() -> None:
     """Обновляет список команд в меню Telegram."""
+    public_commands = [
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="menu", description="Показать кнопки меню"),
+        BotCommand(command="help", description="Все команды"),
+        BotCommand(command="meta", description="Мета Стандарт/Вольный"),
+        BotCommand(command="arena", description="Винрейты классов Арены"),
+        BotCommand(command="comps", description="Поля сражений"),
+        BotCommand(command="card", description="Карта по названию или id"),
+        BotCommand(command="compare", description="Сравнить две колоды"),
+        BotCommand(command="findwith", description="Найти колоды по картам"),
+        BotCommand(command="profile", description="Профиль и Manacost ID"),
+        BotCommand(command="settings", description="Оформление картинок"),
+        BotCommand(command="hq", description="Колода файлом до 3840 px без сжатия"),
+    ]
     try:
-        await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить бота"),
-            BotCommand(command="menu", description="Показать кнопки меню"),
-            BotCommand(command="help", description="Все команды"),
-            BotCommand(command="meta", description="Мета Стандарт/Вольный"),
-            BotCommand(command="arena", description="Винрейты классов Арены"),
-            BotCommand(command="comps", description="Поля сражений"),
-            BotCommand(command="card", description="Карта по названию или id"),
-            BotCommand(command="compare", description="Сравнить две колоды"),
-            BotCommand(command="findwith", description="Найти колоды по картам"),
-            BotCommand(command="profile", description="Профиль и Manacost ID"),
-            BotCommand(command="settings", description="Оформление картинок"),
-            BotCommand(command="hq", description="Колода файлом до 3840 px без сжатия"),
-            BotCommand(command="healt", description="Диагностика бота"),
-        ])
+        await bot.set_my_commands(public_commands)
     except Exception as e:
         print(f"[Deckview] Не удалось обновить меню команд: {e}")
+    # Диагностика нужна только админам: показываем её в их личных чатах.
+    admin_commands = [
+        *public_commands,
+        BotCommand(command="health", description="Диагностика бота"),
+    ]
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.set_my_commands(
+                admin_commands,
+                scope=BotCommandScopeChat(chat_id=admin_id),
+            )
+        except Exception as e:
+            print(f"[Deckview] Не удалось обновить меню команд админа {admin_id}: {e}")
 
 
 def _log_bot_event(event_type: str, chat_type: str | None = None, payload: dict | None = None) -> None:
@@ -687,8 +702,10 @@ async def process_start_command(message: types.Message):
         return
     if start_argument == "settings" and await _connect_group_settings(message):
         return
+    sender_name = message.from_user.first_name if message.from_user else None
+    greeting = f"Привет, {html.escape(sender_name)}!" if sender_name else "Привет!"
     text = (
-        f"Привет, {message.chat.first_name}!\n\n"
+        f"{greeting}\n\n"
         "Отправь код колоды (начинается с <code>AA</code>), и я пришлю картинку.\n"
         "• /help — все команды\n"
         "• /card — картинка карты по названию или id\n"
@@ -3500,10 +3517,11 @@ async def cmd_help(message: types.Message):
         "• <b>/settings</b> — выбрать оформление изображений колод\n"
         "• Кнопка <b>«Сохранить»</b> под колодой — добавить её в профиль\n"
         "• Кнопка <b>«Скачать»</b> — сохранить изображение колоды файлом\n"
-        "• <b>/healt</b> — диагностика источников и токенов (админ)\n"
         "\n"
         "💡 <i>Совет:</i> в личном чате используйте кнопки «Мой профиль» и «О боте»."
     )
+    if message.from_user and is_admin(message.from_user.id):
+        text += "\n\n🛠 <b>/health</b> — диагностика источников и токенов (админ)"
     await message.answer(
         text,
         reply_markup=MAIN_REPLY_KEYBOARD if message.chat.type == "private" else None,
@@ -4901,13 +4919,32 @@ async def msg_about_bot(message: types.Message):
     await message.answer(text, reply_markup=MAIN_REPLY_KEYBOARD if message.chat.type == "private" else None)
 
 
+_DECK_CODE_WRAPPERS = "\"'«»“”„.,;:!?()[]<>"
+NO_DECK_CODE_HINT = (
+    "Не нашёл в сообщении код колоды 🤔\n\n"
+    "Код начинается с <code>AA</code>: скопируйте колоду в редакторе колод "
+    "Hearthstone и вставьте код сюда.\n"
+    "Ищете карту? Напишите <code>/card Название</code>.\n"
+    "Все команды — /help"
+)
+
+
+def _deck_code_token(word: str) -> str | None:
+    """Return ``word`` without quotes/punctuation if it looks like a deck code."""
+    token = word.strip(_DECK_CODE_WRAPPERS)
+    if token.startswith("AA") and len(token) > 10:
+        return token
+    return None
+
+
 def _extract_deck_code_from_text(text: str):
     """Extract first token that looks like a deck code (starts with AA)."""
     if not text:
         return None
     for word in text.split():
-        if word.startswith("AA") and len(word) > 10:
-            return word
+        token = _deck_code_token(word)
+        if token:
+            return token
     return None
 
 
@@ -5318,10 +5355,13 @@ async def find_code_in_message(event: types.Message):
         else:
             await event.reply_photo(photo, caption=caption, reply_markup=reply_markup)
 
-    # Ищем все слова, начинающиеся на AA (коды колод)
+    # Ищем все слова, похожие на коды колод (AA…)
     words = text.split()
-    for i, word in enumerate(words):
-        if word.startswith('AA'):
+    found_code = False
+    for i, raw_word in enumerate(words):
+        word = _deck_code_token(raw_word)
+        if word:
+            found_code = True
             code_index = text.find(word)
             raw_before = text[:code_index].strip() if code_index > 0 else ""
             deck_name = _normalize_pasted_deck_name(raw_before)
@@ -5405,28 +5445,7 @@ async def find_code_in_message(event: types.Message):
                 except Exception:
                     pass
                 err_text = str(e)
-                err_lower = err_text.lower()
-                if "invalid rune costs" in err_lower:
-                    await _send_error(
-                        "⚠️ Этот код колоды содержит недействительные руны.\n"
-                        "Скорее всего, колода создана в старом патче — обновите её в клиенте и скопируйте код заново."
-                    )
-                elif "invalid hero" in err_lower:
-                    await _send_error(
-                        "⚠️ Герой в этом коде колоды больше не существует в API.\n"
-                        "Возможно, колода устарела — попробуйте обновить её в клиенте Hearthstone."
-                    )
-                elif "unsupported string format or version" in err_lower:
-                    await _send_error(
-                        "⚠️ Этот формат кода колоды не поддерживается.\n"
-                        "Убедитесь, что код скопирован из актуальной версии Hearthstone."
-                    )
-                elif "BATTLE_NET_TOKEN" in err_text or "401" in err_text or "403" in err_text:
-                    await _send_error(
-                        "Ошибка доступа к Blizzard API: токен недействителен или истёк. Обратитесь к администратору."
-                    )
-                else:
-                    await _send_error(f"Ошибка при создании картинки: {err_text[:400]}")
+                await _send_error(friendly_deck_error(e))
                 _log_bot_event("error", getattr(event.chat, "type", None), {"context": "deck_code", "error": err_text[:300]})
                 return
 
@@ -5435,10 +5454,7 @@ async def find_code_in_message(event: types.Message):
                     await processing_msg.delete()
                 except Exception:
                     pass
-                await _send_error(
-                    "Не удалось расшифровать колоду по этому коду. "
-                    "Проверьте код или настройки бота (BATTLE_NET_TOKEN)."
-                )
+                await _send_error(UNREADABLE_DECK_CODE)
                 _log_bot_event("error", getattr(event.chat, "type", None), {"context": "deck_code", "error": "image None"})
                 return
 
@@ -5508,6 +5524,10 @@ async def find_code_in_message(event: types.Message):
                 getattr(event.chat, "type", None),
                 {"source": "channel_comment" if is_channel_post else "chat"},
             )
+
+    # В группах молчим, а в личке объясняем, что прислать.
+    if not found_code and getattr(event.chat, "type", None) == "private":
+        await event.answer(NO_DECK_CODE_HINT)
 
 
 @router.callback_query(F.data.startswith("open_pack:"))

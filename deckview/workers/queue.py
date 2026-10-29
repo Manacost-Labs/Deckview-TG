@@ -13,9 +13,10 @@ from deckview.config import (
 
 try:
     from redis import Redis
-    from rq import Queue
+    from rq import Callback, Queue
 except Exception as exc:  # pragma: no cover - exercised on hosts without RQ deps.
     Redis = None
+    Callback = None
     Queue = None
     _IMPORT_ERROR = exc
 else:
@@ -23,6 +24,7 @@ else:
 
 _QUEUE = None
 _API_QUEUE = None
+_RENDER_FAILED_HOOK = "deckview.workers.jobs.render_deck_message_failed"
 
 
 def _normalized_job_status(job: Any) -> str:
@@ -84,12 +86,17 @@ def enqueue_deck_render(payload: dict[str, Any]) -> str | None:
         # RQ 2.x serializes enqueued_at with second precision. Keep a precise
         # enqueue timestamp in the payload so queue latency telemetry is useful.
         queued_payload["_queued_at_ns"] = time.time_ns()
+        # The job reports its own errors; these hooks replace the status
+        # message when RQ aborts the job (timeout or stop) instead.
+        failure_hook = Callback(_RENDER_FAILED_HOOK, timeout=15)
         job = q.enqueue(
             "deckview.workers.jobs.render_deck_message_job",
             queued_payload,
             job_timeout=DECKVIEW_QUEUE_JOB_TIMEOUT,
             result_ttl=3600,
             failure_ttl=86400,
+            on_failure=failure_hook,
+            on_stopped=failure_hook,
         )
         return job.id
     except Exception as exc:
