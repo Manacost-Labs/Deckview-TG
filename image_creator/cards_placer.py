@@ -378,12 +378,16 @@ def _place_cards_rust(
             image_resolution=image_resolution,
         )
         image_bytes = render_deck_image(payload)
-        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+        # Image.open only parses the header; pixels decode on first access.
+        # Delivery reuses the native bytes, so most renders never decode.
+        image = Image.open(BytesIO(image_bytes))
+        if image.mode != "RGB":
+            image = image.convert("RGB")
         image.info["deckview_renderer"] = "rust"
         image.info["deckview_image_resolution"] = image_resolution
         # Downstream API/Telegram delivery can persist the native JPEG without
-        # paying for a second Pillow encode. Keep the PIL image for the public
-        # Python contract and visual fallback compatibility.
+        # paying for a second Pillow encode. Keep the (lazy) PIL image for the
+        # public Python contract and visual fallback compatibility.
         image.info["deckview_encoded_jpeg"] = bytes(image_bytes)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         print(f"[Deckview Rust] place_cards rendered in {elapsed_ms} ms")

@@ -26,6 +26,7 @@ _SAFE_FIELDS = {
     "jpeg_ms",
     "db_ms",
     "delivery_ms",
+    "telegram_photo_ms",
     "handler_total_ms",
     "card_count",
     "unique_card_count",
