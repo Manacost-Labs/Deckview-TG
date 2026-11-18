@@ -14,6 +14,7 @@ from aiogram.types import BufferedInputFile, CopyTextButton, InlineKeyboardButto
 from deckview.config import (
     CHANNEL_BOT_TOKEN, CHANNEL_ID,
     CLASS_EMOJI_ID_MAP, MODE_EMOJI_ID_MAP, PREMIUM_EMOJI_ID,
+    PUBLISH_IMAGE_STYLE,
     normalize_deck_class_name,
 )
 from deckview.integrations.hsguru_archetype import recognize_archetype
@@ -181,7 +182,11 @@ async def publish_deck(
             deck_name = archetype_name
 
     try:
-        image, cost, deck_class_from_api, deck_mode_from_api, _ = await create_picture(deck_code, deck_name)
+        image, cost, deck_class_from_api, deck_mode_from_api, _ = await create_picture(
+            deck_code,
+            deck_name,
+            image_style=PUBLISH_IMAGE_STYLE,
+        )
     except Exception as e:
         return {"image_generated": False, "telegram": False, "wordpress": False, "error": str(e)}
 

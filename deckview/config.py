@@ -65,6 +65,10 @@ FOLDER = "cards/"
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
 # Optional: use a different bot token for posting to channel
 CHANNEL_BOT_TOKEN = os.getenv("CHANNEL_BOT_TOKEN", "").strip() or TOKEN
+# Стиль картинок автопубликации (лента hs-manacost.ru и канал): parchment или classic.
+PUBLISH_IMAGE_STYLE = os.getenv("DECKVIEW_PUBLISH_IMAGE_STYLE", "parchment").strip().lower()
+if PUBLISH_IMAGE_STYLE not in {"classic", "parchment"}:
+    PUBLISH_IMAGE_STYLE = "parchment"
 # ID группы обсуждения канала (для комментариев к постам). Если не задан — берётся из getChat(channel).linked_chat_id
 _discussion = os.getenv("DISCUSSION_GROUP_ID", "").strip()
 try:
